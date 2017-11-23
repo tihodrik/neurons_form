@@ -26,8 +26,11 @@ namespace NeuronsForm
         private int q;
         private float dt;
 
+        private float[/*шаг*/][/*номер нейрона*/] x;                    // Характеристики нейрона
+        private float[/*шаг*/][/*номер нейрона*/,/*номер слоя*/] w;		// синаптические веса нейрона
         public Form1()
         {
+            StartPosition = FormStartPosition.CenterScreen;
             InitializeComponent();
         }
 
