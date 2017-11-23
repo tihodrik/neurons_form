@@ -28,6 +28,7 @@ namespace NeuronsForm
 
         private float[/*шаг*/][/*номер нейрона*/] x;                    // Характеристики нейрона
         private float[/*шаг*/][/*номер нейрона*/,/*номер слоя*/] w;		// синаптические веса нейрона
+
         public Form1()
         {
             StartPosition = FormStartPosition.CenterScreen;
@@ -257,19 +258,139 @@ namespace NeuronsForm
 
         // Расчет фазовой траектории
 
-        private void InitializationW()
+        private void CreateW()
         {
+            w = new float[q][,];
 
+            for (int k = 0; k < q; k++)
+                w[k] = new float[n, n];
+        }
+        private void CreateX()
+        {
+            x = new float[q + 1][];
+
+            for (int k = 0; k < q; k++)
+            {
+                x[k + 1] = new float[n];
+            }
+        }
+
+        private void SetRandomW()
+        {
+            Random rnd = new Random();
+            for (int i = 0; i < n; i++)
+            {
+                for (int j = 0; j < n; j++)
+                {
+                    w[0][i, j] = rnd.Next((int)B);
+                }
+            }
+            for (int k = 1; k < q; k++)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    for (int j = 0; j < n; j++)
+                    {
+                        w[k][i, j] = w[0][i, j];
+                    }
+                }
+            }
         }
 
         private void GetX()
         {
+            x[0] = a;
+
+            for (int k = 0; k < q; k++)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    float S = 0;
+                    for (int j = 0; j < n; j++)
+                        S += w[k][i, j] * x[k][j];
+
+                    x[k + 1][i] = x[k][i] + dt * (-y[i] * x[k][i] + S);
+                }
+            }
 
         }
 
         private void button1_Click(object sender, EventArgs e)
         {
+            q = 10;
+            dt = T / q;
 
+            GetDataFromDataGrid();
+
+            CreateW();
+            CreateX();
+
+            GetX();
+
+            RefreshTab3();
+        }
+
+        private void RefreshTab3()
+        {
+            int rows = dataGridView2.Rows.Count;
+            while (rows > 0)
+            {
+                dataGridView2.Rows.RemoveAt(0);
+                rows--;
+            }
+
+            int cols = dataGridView2.Columns.Count;
+            while (cols > 0)
+            {
+                dataGridView2.Columns.RemoveAt(0);
+                cols--;
+            }
+
+            dataGridView2.Columns.Add("Column5", "Step");
+
+            for (int i = 0; i < n; i++)
+            {
+                dataGridView2.Columns.Add(String.Format("Column{0}", 6 + i), String.Format("X{0}", i + 1));
+            }
+
+            rows = dataGridView2.Rows.Count;
+            if (rows < q)
+            {
+                dataGridView2.Rows.Add(q);
+                for (int k = 0; k < q; k++)
+                {
+                    dataGridView2["Column5", k].Value = k + 1;
+                    for (int i = 0; i < n; i++)
+                        dataGridView2[i + 1, k].Value = x[k][i];
+                }
+            }
+        }
+
+        private void GetDataFromDataGrid()
+        {
+            if (!dataGridView1.ReadOnly)
+            {
+                // get a
+                a = new float[n];
+                for (int i = 0; i < n; i++)
+                {
+                    a[i] = float.Parse(dataGridView1[1, i].Value.ToString());
+                }
+
+                // get A
+                A = new float[n];
+                for (int i = 0; i < n; i++)
+                {
+                    A[i] = float.Parse(dataGridView1[2, i].Value.ToString());
+                }
+
+                // get A
+                y = new float[n];
+                for (int i = 0; i < n; i++)
+                {
+                    y[i] = float.Parse(dataGridView1[3, i].Value.ToString());
+                }
+            }
         }
     }
 }
