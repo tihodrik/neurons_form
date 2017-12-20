@@ -14,20 +14,29 @@ namespace NeuronsForm
     {
         // Параметры задачи
         private int n;
-        private float T;
-        private float B;
-        private float M1;
-        private float M2;
-        private float[] a;
-        private float[] A;
-        private float[] y;
+        private double T;           // верхняя граница отрезка интегрирования
+        private double B;           // ограничения для весовых коэффициентов
+        private double M1;          // штрафной коэффициент на точность весовых коэффициентов
+        private double M2;          // штрафной коэффициент на точность решения
+        private double[] a;         // начальные значения
+        private double[] A;         // конечные значения
+        private double[] gamma;     // коэффициенты затухания
 
         // параметры метода
-        private int q;
-        private float dt;
+        private int q = 200;             // количество слоев, q = [10 ... 10 000]
+        private double dt;              // мелкость разбиения, dt = T/q
+        private double alpha = 1;       // шаг градиентного спуска, alpha = [10^-7 ... 10^3]
+        private double epsilon = 1E-6;   // точность вычислений, epsilon = [10^-10 ... 10^-2]
+        private double[][] p;           // множители Лагранжа
 
-        private float[/*шаг*/][/*номер нейрона*/] x;                    // Характеристики нейрона
-        private float[/*шаг*/][/*номер нейрона*/,/*номер слоя*/] w;		// синаптические веса нейрона
+        private double[/*номер слоя*/][/*номер нейрона*/] x0;                                       // характеристики нейронов
+        private double[/*номер слоя*/][/*номер нейрона*/] x1;
+
+        private double[/*номер слоя*/][/*номер нейрона слоя k*/,/*номер нейрона слоя k+1*/] w0;		// синаптические веса нейронов
+        private double[/*номер слоя*/][/*номер нейрона слоя k*/,/*номер нейрона слоя k+1*/] w1;
+
+        private double I0;
+        private double I1;
 
         public Form1()
         {
@@ -83,12 +92,12 @@ namespace NeuronsForm
         }
 
 
-        private float CheckNumericValue(TextBox element)
+        private double CheckNumericValue(TextBox element)
         {
-            float result;
+            double result;
             try
             {
-                if (!float.TryParse(element.Text, out result))
+                if (!double.TryParse(element.Text, out result))
                 {
                     ArgumentException e = new ArgumentException();
                     e.Source = element.Name;
@@ -153,7 +162,6 @@ namespace NeuronsForm
                 }
             }
         }
-
         private void textBoxT_TextChanged(object sender, EventArgs e)
         {
             ArgumentException exc = new ArgumentException();
@@ -181,7 +189,6 @@ namespace NeuronsForm
 
             MakeAllEditable();
         }
-
         private void textBoxB_TextChanged(object sender, EventArgs e)
         {
             ArgumentException exc = new ArgumentException();
@@ -209,7 +216,6 @@ namespace NeuronsForm
 
             MakeAllEditable();
         }
-
         private void textBoxM1_TextChanged(object sender, EventArgs e)
         {
             ArgumentException exc = new ArgumentException();
@@ -232,7 +238,6 @@ namespace NeuronsForm
 
             MakeAllEditable();
         }
-
         private void textBoxM2_TextChanged(object sender, EventArgs e)
         {
             ArgumentException exc = new ArgumentException();
@@ -256,77 +261,334 @@ namespace NeuronsForm
             MakeAllEditable();
         }
 
-        // Расчет фазовой траектории
+        private void textBoxQ_TextChanged(object sender, EventArgs e)
+        {
+            ArgumentException exc = new ArgumentException();
+            exc.Source = textBoxQ.Name;
 
+            if (textBoxQ.Text == "" || textBoxQ.Text == "-" || textBoxQ.Text == "+")
+                return;
+
+            try
+            {
+                // q - целое число
+                if (!Int32.TryParse(CheckNumericValue(textBoxQ).ToString(), out q))
+                {
+                    throw exc;
+                }
+
+                // q - положительное число
+                if (q <= 0)
+                {
+                    throw exc;
+                }
+            }
+            catch (ArgumentException exception)
+            {
+                MakeOthersReadOnly(exception);
+                return;
+            }
+
+
+            MakeAllEditable();
+        }
+        private void textBoxAlpha_TextChanged(object sender, EventArgs e)
+        {
+            ArgumentException exc = new ArgumentException();
+            exc.Source = textBoxAlpha.Name;
+
+            if (textBoxAlpha.Text == "" || textBoxAlpha.Text == "-" || textBoxAlpha.Text == "+")
+                return;
+
+            try
+            {
+                // alpha - число
+                alpha = CheckNumericValue(textBoxAlpha);
+
+                // alpha - положительное число
+                if (alpha <= 0)
+                {
+                    throw exc;
+                }
+            }
+            catch (ArgumentException exception)
+            {
+                MakeOthersReadOnly(exception);
+                return;
+            }
+
+            MakeAllEditable();
+        }
+        private void textBoxEpsilon_TextChanged(object sender, EventArgs e)
+        {
+            ArgumentException exc = new ArgumentException();
+            exc.Source = textBoxEpsilon.Name;
+
+            if (textBoxEpsilon.Text == "" || textBoxEpsilon.Text == "-" || textBoxEpsilon.Text == "+")
+                return;
+
+            try
+            {
+                // epsilon - число
+                epsilon = CheckNumericValue(textBoxEpsilon);
+
+                // alpha - положительное число
+                if (epsilon <= 0)
+                {
+                    throw exc;
+                }
+            }
+            catch (ArgumentException exception)
+            {
+                MakeOthersReadOnly(exception);
+                return;
+            }
+
+            MakeAllEditable();
+        }
+
+
+        // Создание
         private void CreateW()
         {
-            w = new float[q][,];
+            w0 = new double[q][,];
+            w1 = new double[q][,];
 
             for (int k = 0; k < q; k++)
-                w[k] = new float[n, n];
+            {
+                w0[k] = new double[n, n];
+                w1[k] = new double[n, n];
+            }
         }
         private void CreateX()
         {
-            x = new float[q + 1][];
+            x0 = new double[q + 1][];
+            x1 = new double[q + 1][];
+
+            for (int k = 0; k < q + 1; k++)
+            {
+                x0[k] = new double[n];
+                x1[k] = new double[n];
+            }
+        }
+        private void CreateP()
+        {
+            p = new double[q + 1][];
+            p[q] = new double[n];
+            for (int k = q; k >= 0; k--)
+                p[k] = new double[n];
+        }
+
+        // Инициализация
+        private void SetInitialX()
+        {
+            double S;
+            x0[0] = a;
 
             for (int k = 0; k < q; k++)
             {
-                x[k + 1] = new float[n];
-            }
-        }
-
-        private void SetRandomW()
-        {
-            Random rnd = new Random();
-            for (int i = 0; i < n; i++)
-            {
-                for (int j = 0; j < n; j++)
+                for (int i = 0; i < n; i++)
                 {
-                    w[0][i, j] = rnd.Next((int)B);
+                    S = 0;
+                    for (int j = 0; j < n; j++)
+                        S += w0[k][i, j] * x0[k][j];
+
+                    x0[k + 1][i] = x0[k][i] + dt * (-gamma[i] * x0[k][i] + S);
                 }
             }
-            for (int k = 1; k < q; k++)
+        }
+        private void SetInitialW()
+        {
+            Random rnd = new Random();
+            for (int k = 0; k < q; k++)
             {
                 for (int i = 0; i < n; i++)
                 {
                     for (int j = 0; j < n; j++)
                     {
-                        w[k][i, j] = w[0][i, j];
+                        if (i == j)
+                        {
+                            w0[k][i, j] = 0;
+                            continue;
+                        }
+                        w0[k][i, j] = rnd.NextDouble() + rnd.Next((int)B) - rnd.Next((int)B);
                     }
                 }
             }
         }
-
-        private void GetX()
+        private void SetInitialI()
         {
-            x[0] = a;
+            I0 = 0;
+            double S;
+
+            S = 0;
+            for (int k = 0; k < q; k++)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    for (int j = 0; j < n; j++)
+                    {
+                        S += Math.Pow(w0[k][i, j], 2);
+                    }
+                }
+            }
+
+            I0 += M1 * dt * S;
+
+            S = 0;
+            for (int i = 0; i < n; i++)
+            {
+                S += (x0[q][i] - A[i]) * (x0[q][i] - A[i]);
+            }
+
+            I0 += M2 * S;
+        }
+
+        // Расчет
+        private void CalculateP()
+        {
+            double S;
+
+            for (int i = 0; i < n; i++)
+            {
+                p[q][i] = -2 * M2 * (x0[q][i] - A[i]);
+            }
+
+            for (int k = q - 1; k > 0; k--)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    S = 0;
+                    for (int j = 0; j < n; j++)
+                    {
+                        S += p[k + 1][j] * w0[k][j, i];
+                    }
+                    p[k][i] = p[k + 1][i] * (1 - dt * gamma[i]) + dt * S;
+                }
+            }
+        }
+        private void CalculateX()
+        {
+            double S;
+
+            x1[0] = a;
+            for (int k = 0; k < q; k++)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    S = 0;
+                    for (int j = 0; j < n; j++)
+                    {
+                        S += w1[k][i, j] * x1[k][j];
+                    }
+                    x1[k+1][i] = x1[k][i] + dt * (-gamma[i] * x1[k][i] + S);
+                }
+            }
+        }
+        private void CalculateW()
+        {
+            double d;
 
             for (int k = 0; k < q; k++)
             {
                 for (int i = 0; i < n; i++)
                 {
-                    float S = 0;
                     for (int j = 0; j < n; j++)
-                        S += w[k][i, j] * x[k][j];
+                    {
+                        if (i == j)
+                        {
+                            w1[k][i, j] = 0;
+                            continue;
+                        }
+                        d = dt * (2 * w0[k][i, j] * M1 - p[k + 1][i] * x0[k][j]);
+                        w1[k][i, j] = w0[k][i, j] - alpha * d;
 
-                    x[k + 1][i] = x[k][i] + dt * (-y[i] * x[k][i] + S);
+                        if (w1[k][i, j] > B)
+                        {
+                            w1[k][i, j] = B;
+                        }
+                        if (w1[k][i, j] < -B)
+                        {
+                            w1[k][i, j] = -B;
+                        }
+                    }
+                }
+            }
+        }
+        private void CalculateI()
+        {
+            I1 = 0;
+            double S;
+
+            S = 0;
+            for (int k = 0; k < q; k++)
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    for (int j = 0; j < n; j++)
+                    {
+                        S += Math.Pow(w1[k][i, j], 2);
+                    }
                 }
             }
 
+            I1 += M1 * dt * S;
+
+            S = 0;
+            for (int i = 0; i < n; i++)
+            {
+                S += (x1[q][i] - A[i]) * (x1[q][i] - A[i]);
+            }
+
+            I1 += M2 * S;
         }
 
         private void button1_Click(object sender, EventArgs e)
         {
-            q = 10;
-            dt = T / q;
 
             GetDataFromDataGrid();
 
-            CreateW();
+            dt = T / q;
+
             CreateX();
+            CreateW();
+            CreateP();
 
-            GetX();
+            step1: SetInitialW();
+            step2: SetInitialX();
+            step3: SetInitialI();
 
+            while (true)
+            {
+                step4: CalculateP();
+                step5: CalculateW();
+                step6: CalculateX();
+                step7: CalculateI();
+
+                if (I0 < I1)
+                {
+                    if (alpha == 0)
+                    {
+                        MessageBox.Show("alpha = 0");
+                        break;
+                    }
+                    alpha = alpha / 2;
+                    goto step5;
+                }
+                if (Math.Abs(I0 - I1) < epsilon)
+                {
+                    break;
+                }
+                if (Math.Abs(I0 - I1) >= epsilon)
+                {
+                    I0 = I1;
+                    x0 = x1;
+                    w0 = w1;
+                    goto step4;
+                }
+            }
+
+            MessageBox.Show("Finished");
             RefreshTab3();
         }
 
@@ -361,7 +623,7 @@ namespace NeuronsForm
                 {
                     dataGridView2["Column5", k].Value = k + 1;
                     for (int i = 0; i < n; i++)
-                        dataGridView2[i + 1, k].Value = x[k][i];
+                        dataGridView2[i + 1, k].Value = x1[k][i];
                 }
             }
         }
@@ -371,26 +633,33 @@ namespace NeuronsForm
             if (!dataGridView1.ReadOnly)
             {
                 // get a
-                a = new float[n];
+                a = new double[n];
                 for (int i = 0; i < n; i++)
                 {
-                    a[i] = float.Parse(dataGridView1[1, i].Value.ToString());
+                    a[i] = double.Parse(dataGridView1[1, i].Value.ToString());
                 }
 
                 // get A
-                A = new float[n];
+                A = new double[n];
                 for (int i = 0; i < n; i++)
                 {
-                    A[i] = float.Parse(dataGridView1[2, i].Value.ToString());
+                    A[i] = double.Parse(dataGridView1[2, i].Value.ToString());
                 }
 
-                // get A
-                y = new float[n];
+                // get y
+                gamma = new double[n];
                 for (int i = 0; i < n; i++)
                 {
-                    y[i] = float.Parse(dataGridView1[3, i].Value.ToString());
+                    gamma[i] = double.Parse(dataGridView1[3, i].Value.ToString());
                 }
             }
+        } 
+        private void GetDataFrom()
+
+        {
+
         }
+
+
     }
 }
